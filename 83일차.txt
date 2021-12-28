@@ -45,10 +45,14 @@ Hash 처리
 -> 이메일로 보내기 위한 라이브러리 
 
 spring-context-support
+-> 애플리케이션 컨텍스트 컨테이너에서 사용되지만 자주 사용되지 않는 부가적인 기능들을 분리해 놓은 것
+-> 캐쉬, 메일, 스케쥴링, UI 관련 기능 포함
 
 javax.mail
+-> SMTP, POP3, IMAP 을 통해 전자 메일을 주고 받을 수 있께 하는 자바 API이다
 
 jackson-Databind
+-> java Object를 JSON으로 변환하거나 JSON을 Java Object로 변환하는데 사용할 수 있는 java 라이브러리입니다
 
 
 HomeController없이 작동하는 방법
@@ -60,6 +64,11 @@ HomeController없이 작동하는 방법
 - 모든 방식의 메서드에 대해서 작동한다
 - 메서드를 구분하는 경우에는 사용하면 안된다
 
+컨트롤러의 특정 수행 내용 없이 단순히 view를 띄우기 위해서라면
+dispatcherServlet이 곧바로 viewName을 지정해서 jsp로 포워딩하게 설정한다
+과정이 복잡하니까 컨트롤러에서 할게 없으면 바로 가게 할 수 있다
+but 메서드 구분이 안된다. 그래서 모든 방식의 메서드에 대해서 작동한다
+메서드를 구분하는 경우에는 사용하면 안된다
 
 ===========
 
@@ -72,3 +81,168 @@ SHA 512 -> 대소문자 일치 여부를 판별하기 쉽다 / 정해져있는 �
 
 
 네이버  내 메일함 환경설정에 가서 사용하믕로 변경
+
+===========
+
+MessageDigest
+-> Java에서 MD5, SHA를 이요한 알고리즘을 사용하려면 MessageDigest 클래스를 이용합니다
+-> MessageDigest는 update()메서드가 있는데 이 메서드를 호출할 때마다 객체 내에 저장된 digest값이 계속해서 갱신된다
+-> 그래서 digest()메서드를 호출하면 그 값을 가져올 수 있다
+
+===========
+
+package com.itbank.component;
+
+import java.io.UnsupportedEncodingException;
+import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
+import org.springframework.stereotype.Component;
+
+@Component			// component는 빈이 될지 안될지 모르는 중간단계
+public class Hash {
+
+	public String getHash(String input) {
+		
+		try {
+			// SHA-512를 대입할 걍우 대입한 MessageDigest 객체를 생성
+			MessageDigest md = MessageDigest.getInstance("SHA-512");
+			
+			// static에서 뽑는거라서 값이 만들어져 있을 수 있어서 reset을 한번 해준다
+			md.reset();
+			
+			// 입력받은 값을 바이트 단위로 쪼갠다는 의미 
+			// 그리고 md에 업데이트시킨다
+			// 인코딩이 꺠져서 다른값이 쪼개질 수 있으니까 인코딩을 맞춰준다
+			md.update(input.getBytes("UTF-8"));
+			
+			// 128비트의 16진수로 만들어 낸다 
+			// 그리고 이렇게 만들어진 문자열을 반환한다
+			// BigInteger 사용하는 이유 : 문자열 형태로 이루어져 있어 숫자의 범위가 무한하기 때문에 어떤 숫자도 담을 수 있다
+			// md.digest() : 바이트배열로 해시를 반환합니다. 
+			String hashNumber = String.format("%0128x", new BigInteger(1, md.digest()));
+			
+			// 해시 처리된 문자열을 반환한다
+			return hashNumber;
+		}
+		catch(NoSuchAlgorithmException | UnsupportedEncodingException e) {
+			e.printStackTrace();
+			System.out.println("해시 알고리즘이 제대로 작동하지 않았습니다");
+		}
+		
+		return null;
+	}
+
+}
+
+==========
+
+package com.itbank.service;
+
+import java.util.Properties;
+import java.util.Random;
+
+import javax.mail.Authenticator;
+import javax.mail.Message;
+import javax.mail.MessagingException;
+import javax.mail.PasswordAuthentication;
+import javax.mail.Session;
+import javax.mail.Transport;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
+
+import org.springframework.stereotype.Service;
+
+@Service
+public class MailService {
+
+	public String getAuthNumber() {
+		Random ran = new Random();
+		
+		String authNumber = "";
+		for(int i = 0; i < 6; i++) {
+			authNumber += ran.nextInt(9);
+		}
+		return authNumber;
+	}
+	
+	// 대상 주소, 인증번호(내용), 메일 전송에 필요한 계정 정보를 받아서 메일을 보낸다
+	public String sendMail(String email, String authNumber, String account) {
+		
+		// 1. 메일 발송 시 필요한 내용
+		String host = "smtp.naver.com";
+		int port = 465;
+		final String username = account.split("/")[0];
+		final String password = account.split("/")[1];
+		
+		String subject = "[KGITBANK] 인증 번호 입니다";	// 제목
+		String body = String.format("인증번호[%s]입니다\n\n", authNumber);
+		
+		// 2. 메일 발송 서버에 대한 인증 및 속성을 설정 (HashMap)
+		// 직렬화 되어 있어서 파일을 전송할 수 있다(key-value)
+		// Properties: Hashtables의 하위 클래스이다
+		// key와 value를 가진다
+		// 파일 입출력을 지원한다
+		// System.getProperties() : 자바를 실행할 때 , 실행되는 곳의 정보를 얻어오거나 운영체제의 정보가 필요할 떄가 있다
+		// 실행 위치에 있는 파일을 읽어드려야 하는데, 현재 위치를 알수 있는 방법 등 시스템의 정보를 가져올 때 System.getProperties()로 가져올 수 있다
+		
+		Properties props = System.getProperties();
+		props.put("mail.smtp.host", host);			// 메일을 보낼 서버 이름
+		props.put("mail.smtp.port", port);			// 메일을 보낼 서버 포트
+		props.put("mail.smtp.auth", "true");		// 메일을 보낼 떄 인증이 필요한가
+		props.put("mail.smtp.ssl.enable", "true");	// 메일 보낼때 암화화 처리 하는가
+		props.put("mail.smtp.ssl.trust", host);		// 메일 보내는 신뢰할 수 있는 서버가 어디인가 
+		
+		// connection, statement랑 비슷
+		// Properties에 저정되어 있는 설정 값을 getDefaultInstance()메서드로 설정값을 저장하여 세션 생성
+		Session mailSession = Session.getDefaultInstance(props, new Authenticator() {
+			String un = username;
+			String pw = password;
+			// 익명의 내부 클래스
+			// 여기서 로그인이 되는 것이다
+			@Override
+			protected PasswordAuthentication getPasswordAuthentication() {
+			
+				
+				// 패스워드 인증방식을 사용하여 로그인 
+				return new PasswordAuthentication(un, pw);
+			}
+		});
+		
+		// 메일을 보내는 과정의 디버깅을 화면에 출력하기 위해 설정
+		mailSession.setDebug(true);
+		
+		
+		// 메일에 보낼 내용 - message를 구성한다
+		// 보낼 내용을 객체로 준비
+		// MimeMessage 생성
+		Message mimeMessage =  new MimeMessage(mailSession);
+		
+		try {
+			// 보내는 사람의 주소
+			mimeMessage.setFrom(new InternetAddress(username + "@naver.com"));
+			
+			// 받는 사람의 주소
+			mimeMessage.setRecipient(Message.RecipientType.TO, new InternetAddress(email));
+			
+			// 제목
+			mimeMessage.setSubject(subject);
+			
+			// 내용
+			mimeMessage.setText(body);
+			
+			// 전송
+			Transport.send(mimeMessage);
+		}
+		catch(MessagingException e) {
+			e.printStackTrace();
+			System.out.println("주소가 잘못되었습니다");
+		}
+		
+		// 보낸 인증번호를 다시 반환하도록 함(body에 포함된 인증번호를 반환)
+		return authNumber;
+	}
+
+}
+
